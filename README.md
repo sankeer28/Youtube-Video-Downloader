@@ -39,6 +39,6 @@ Make sure you have **Python 3.7** or later installed on your machine.
 1. Run the Streamlit app:
 
    ```bash
-   streamlit run app.py
+   streamlit run main.py
    ```
 
