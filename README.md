@@ -1,6 +1,7 @@
 # YouTube Video Downloader 🎥
 
 A simple and intuitive YouTube video downloader built with **Streamlit** and **yt-dlp** (a powerful fork of youtube-dl). This app allows you to download YouTube videos in various formats and qualities with an easy-to-use interface.
+![image](https://github.com/user-attachments/assets/c7f4076e-ed7f-4ade-a20e-fc9b6aa83e58)
 
 ## Features
 
