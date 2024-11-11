@@ -16,7 +16,8 @@ st.set_page_config(
 st.markdown("""
     <style>
 
-        
+        #MainMenu {visibility: hidden;}
+        header {visibility: hidden;}
         .title-container h1 {
             font-size: 3rem;  /* Adjust font size as needed */
             font-weight: bold;
