@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import re
 from datetime import timedelta
+from moviepy.editor import VideoFileClip, AudioFileClip
+import tempfile
 
 st.set_page_config(
     page_title="YouTube Video Downloader",
@@ -13,8 +15,7 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-        #MainMenu {visibility: hidden;}
-        header {visibility: hidden;}
+
         
         .title-container h1 {
             font-size: 3rem;  /* Adjust font size as needed */
@@ -113,53 +114,92 @@ def progress_hook(d):
         st.session_state.status_text.text("Download completed! Processing video...")
 
 def get_available_formats(formats):
-    quality_formats = {}
-
-    for f in formats:
-        height = f.get('height')
-        if not height or not f.get('vcodec') or f['vcodec'] == 'none':
-            continue
-            
-        filesize = f.get('filesize', 0) or 0
-
-        if height not in quality_formats or filesize > quality_formats[height].get('filesize', 0):
-            quality_formats[height] = f
+    quality_formats = {}  
     best_audio = None
+
     for f in formats:
         if (f.get('acodec') != 'none' and not f.get('vcodec')) or f['vcodec'] == 'none':
             if not best_audio or f.get('filesize', 0) > best_audio.get('filesize', 0):
                 best_audio = f
-    sorted_formats = sorted(quality_formats.items(), key=lambda x: x[0], reverse=True)
 
-    return [
-        {
-            'height': height,
-            'format_id': f['format_id'],
-            'quality': f"{height}p ({f.get('ext', 'mp4')})", 
-            'video_ext': f.get('ext', 'mp4'),
-            'audio_format_id': best_audio['format_id'] if best_audio else None
-        }
-        for height, f in sorted_formats
-    ]
+    for f in formats:
+        if not f.get('height') or not f.get('vcodec') or f['vcodec'] == 'none':
+            continue
+            
+        height = f.get('height', 0) 
+        filesize = f.get('filesize', 0) 
+        ext = f.get('ext', 'mp4')  
+        
+        if height > 0:
+            quality_string = f"{height}p ({ext})"
+            if quality_string not in quality_formats or filesize > quality_formats[quality_string]['filesize']:
+                quality_formats[quality_string] = {
+                    'height': height,
+                    'format_id': f['format_id'],
+                    'quality': quality_string,
+                    'video_ext': ext,
+                    'filesize': filesize,
+                    'audio_format_id': best_audio['format_id'] if best_audio else None
+                }
+    unique_formats = list(quality_formats.values())
+    return sorted(unique_formats, key=lambda x: x['height'], reverse=True)
 
+def merge_video_audio(video_path, audio_path, output_path):
+    try:
+        video = VideoFileClip(video_path)
+        audio = AudioFileClip(audio_path)
+        final_video = video.set_audio(audio)
+        final_video.write_videofile(output_path, codec='libx264')
+        video.close()
+        audio.close()
+        return True
+    except Exception as e:
+        st.error(f"Error merging video and audio: {str(e)}")
+        return False
 
 def download_video(url, format_data):
     download_dir = create_download_directory()
+    temp_dir = tempfile.mkdtemp()
     
-    audio_format_id = format_data['audio_format_id'] or 'bestaudio'
-    ydl_opts = {
-        'format': f"{format_data['format_id']}+{audio_format_id}/best",
+    video_opts = {
+        'format': format_data['format_id'],
+        'outtmpl': os.path.join(temp_dir, 'video.%(ext)s'),
         'progress_hooks': [progress_hook],
-        'outtmpl': str(download_dir / '%(title)s.%(ext)s'),
+    }
+    
+    audio_opts = {
+        'format': format_data['audio_format_id'],
+        'outtmpl': os.path.join(temp_dir, 'audio.%(ext)s'),
+        'progress_hooks': [progress_hook],
     }
     
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            return filename
+        with yt_dlp.YoutubeDL(video_opts) as ydl:
+            video_info = ydl.extract_info(url, download=True)
+            video_path = ydl.prepare_filename(video_info)
+
+        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+            audio_info = ydl.extract_info(url, download=True)
+            audio_path = ydl.prepare_filename(audio_info)
+        
+        output_filename = f"{video_info['title']}.mp4"
+        output_path = os.path.join(download_dir, output_filename)
+        st.text("Merging video and audio... Please Wait")
+        if merge_video_audio(video_path, audio_path, output_path):
+            try:
+                os.remove(video_path)
+                os.remove(audio_path)
+                os.rmdir(temp_dir)
+            except Exception as e:
+                st.warning(f"Error cleaning up temporary files: {str(e)}")
+            
+            return output_path
+        else:
+            st.error("Failed to merge video and audio.")
+            return None
+            
     except Exception as e:
-        st.error(f"Error downloading video: {e}")
+        st.error(f"Error downloading video: {str(e)}")
         return None
 
 def main():
@@ -168,6 +208,7 @@ def main():
             <h1>🎥 YouTube Video Downloader</h1>
         </div>
     """, unsafe_allow_html=True)
+    
     
     url = st.text_input("Enter YouTube URL:")
     
@@ -186,8 +227,6 @@ def main():
                 st.markdown(f"**Channel:** {video_info['channel']}   &nbsp;&nbsp;&nbsp; **Duration:** {video_info['duration']}   &nbsp;&nbsp;&nbsp; **Views:** {video_info['view_count']:,}")
                 if video_info['like_count']:
                     st.markdown(f"**Likes:** {video_info['like_count']:,}")
-
-
             
             st.markdown('</div>', unsafe_allow_html=True)
             
@@ -225,11 +264,12 @@ def main():
                     else:
                         st.error("Download failed. Please try again.")
             else:
-                st.warning("Could not fetch video formats. Please check the URL and try again.")
+                st.warning("No compatible formats found. Please try another video.")
         else:
             st.warning("Could not fetch video information. Please check the URL and try again.")
     else:
         st.info("Please enter a YouTube URL to see video information and download options.")
+    
     st.markdown("""
         <div class="footer">
             <p><a href="https://github.com/sankeer28/Youtube-Video-Downloader" target="_blank">GitHub</a></p>
